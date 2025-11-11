@@ -163,8 +163,9 @@ The script accepts the following parameters:
 1. Validates prerequisites (Azure CLI, kubectl, SSH key)
 2. Registers required Azure resource providers
 3. For VM Arc-enablement:
+   - Generates SSH keys on the VM (if not already present)
    - Installs Azure Connected Machine agent on the VM
-   - Connects the VM to Azure Arc-enabled servers
+   - Connects the VM to Azure Arc-enabled servers using the VM's managed identity for authentication
 4. For Kubernetes Arc-enablement:
    - Installs Azure CLI connectedk8s extension
    - Retrieves kubeconfig from the VM
