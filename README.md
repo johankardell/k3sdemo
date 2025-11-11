@@ -72,6 +72,109 @@ sudo /usr/local/bin/k3s-uninstall.sh
 - Security features like UFW are disabled for simplicity
 - The script assumes local access to the VM with root privileges
 - k3s runs as a systemd service and will automatically start on boot
+
+## Azure Arc Enablement Script
+
+This repository contains a shell script to enable Azure Arc for both the VM and the K3s cluster created in this repository.
+
+### What is Azure Arc?
+
+Azure Arc allows you to manage and govern resources outside of Azure (or within Azure) through Azure Resource Manager. This script enables:
+
+1. **Azure Arc-enabled Servers**: Manage the VM as an Azure resource with Azure management capabilities
+2. **Azure Arc-enabled Kubernetes**: Manage the K3s cluster through Azure, enabling GitOps, Azure Policy, and other Azure services
+
+### Prerequisites
+
+- Azure CLI installed and configured (`az login`)
+- kubectl installed
+- An existing Azure VM created with `create-ubuntu-vm.sh`
+- K3s installed on the VM using `install-k3s.sh`
+- SSH access to the VM
+- Required Azure permissions to register resource providers and create Arc resources
+
+### Usage
+
+Enable both Azure Arc for the VM and K3s cluster:
+
+```bash
+./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group ubuntu-vm-rg
+```
+
+Customize the location and cluster name:
+
+```bash
+./enable-azure-arc.sh \
+  --vm-name ubuntu-vm \
+  --resource-group ubuntu-vm-rg \
+  --location westus2 \
+  --cluster-name my-k3s-cluster
+```
+
+Enable only Kubernetes Arc (skip VM Arc):
+
+```bash
+./enable-azure-arc.sh \
+  --vm-name ubuntu-vm \
+  --resource-group ubuntu-vm-rg \
+  --skip-vm-arc
+```
+
+Enable only VM Arc (skip Kubernetes Arc):
+
+```bash
+./enable-azure-arc.sh \
+  --vm-name ubuntu-vm \
+  --resource-group ubuntu-vm-rg \
+  --skip-k8s-arc
+```
+
+### Configuration Options
+
+The script accepts the following parameters:
+
+**Required:**
+- `--vm-name`: Name of the VM to Arc-enable
+- `--resource-group`: Name of the Azure resource group
+
+**Optional:**
+- `--location`: Azure region (default: `swedencentral`)
+- `--cluster-name`: Name for the Arc-enabled K3s cluster (default: `<VM_NAME>-k3s`)
+- `--admin-username`: Admin username for VM SSH (default: `azureuser`)
+- `--ssh-key`: Path to SSH private key (default: `~/.ssh/id_rsa`)
+- `--skip-vm-arc`: Skip Azure Arc enablement for the VM
+- `--skip-k8s-arc`: Skip Azure Arc enablement for Kubernetes
+- `--help`: Display help message
+
+### What the Script Does
+
+1. Validates prerequisites (Azure CLI, kubectl, SSH key)
+2. Registers required Azure resource providers
+3. For VM Arc-enablement:
+   - Installs Azure Connected Machine agent on the VM
+   - Connects the VM to Azure Arc-enabled servers
+4. For Kubernetes Arc-enablement:
+   - Installs Azure CLI connectedk8s extension
+   - Retrieves kubeconfig from the VM
+   - Connects the K3s cluster to Azure Arc-enabled Kubernetes
+5. Provides links to view resources in Azure Portal
+
+### After Arc Enablement
+
+Once enabled, you can:
+
+- View and manage the VM in Azure Portal under Arc-enabled servers
+- View and manage the K3s cluster in Azure Portal under Arc-enabled Kubernetes
+- Apply Azure Policies to the cluster
+- Use GitOps with Azure Arc
+- Monitor the cluster with Azure Monitor
+- Deploy Azure services to the cluster
+
+### Azure Portal Links
+
+- View Arc-enabled servers: https://portal.azure.com/#view/Microsoft_Azure_HybridCompute/AzureArcCenterBlade/~/servers
+- View Arc-enabled Kubernetes: https://portal.azure.com/#view/Microsoft_Azure_HybridCompute/AzureArcCenterBlade/~/kubernetes
+
 ## Azure Ubuntu VM Creation Script
 
 This repository contains a bash script to create an Ubuntu Server in Azure with a user-assigned managed identity.
