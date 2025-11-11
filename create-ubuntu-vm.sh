@@ -180,6 +180,18 @@ az vm create \
 
 print_info "VM '$VM_NAME' created successfully."
 
+# Configure auto-shutdown at 6 PM Swedish time (18:00 CEST / 17:00 CET)
+# Using 1600 UTC which is 18:00 CEST (summer time, most of working year)
+# Note: During CET (winter time), this will be 17:00 Swedish time
+print_info "Configuring auto-shutdown at 18:00 Swedish time (CEST)..."
+az vm auto-shutdown \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$VM_NAME" \
+    --time 1600 \
+    --output none
+
+print_info "Auto-shutdown configured successfully (18:00 CEST / 17:00 CET)."
+
 # Get the resource group ID
 RG_ID=$(az group show \
     --name "$RESOURCE_GROUP" \
@@ -220,6 +232,7 @@ print_info "Resource Group: $RESOURCE_GROUP"
 print_info "Location: $LOCATION"
 print_info "Admin Username: $ADMIN_USERNAME"
 print_info "Managed Identity: $IDENTITY_NAME"
+print_info "Auto-Shutdown: 18:00 CEST (17:00 CET) daily"
 print_info "VM Details:"
 echo "$VM_INFO"
 print_info "================================"
