@@ -91,6 +91,18 @@ Azure Arc allows you to manage and govern resources outside of Azure (or within 
 - An existing Azure VM created with `create-ubuntu-vm.sh`
 - K3s installed on the VM using `install-k3s.sh`
 - SSH access to the VM
+- **Network access**: The K3s API server (port 6443) must be accessible from the machine running this script. You may need to add an NSG rule to allow this:
+  ```bash
+  az network nsg rule create \
+    --resource-group <RESOURCE_GROUP> \
+    --nsg-name <VM_NAME>-nsg \
+    --name AllowK3sAPI \
+    --priority 1100 \
+    --source-address-prefixes <YOUR_IP>/32 \
+    --destination-port-ranges 6443 \
+    --access Allow \
+    --protocol Tcp
+  ```
 - Required Azure permissions to register resource providers and create Arc resources
 
 ### Usage

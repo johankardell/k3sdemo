@@ -264,6 +264,9 @@ if [ "$SKIP_K8S_ARC" = false ]; then
     # Get kubeconfig from the VM
     print_info "Retrieving kubeconfig from VM..."
     TEMP_KUBECONFIG=$(mktemp)
+    
+    # Note: This requires K3s API server (port 6443) to be accessible from this machine
+    # If the NSG doesn't allow this, you may need to add a rule for port 6443
     scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP:/etc/rancher/k3s/k3s.yaml" "$TEMP_KUBECONFIG"
     
     # Replace localhost with VM's public IP in kubeconfig
