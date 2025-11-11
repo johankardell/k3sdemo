@@ -7,11 +7,13 @@ set -e  # Exit on error
 
 # Configuration variables
 RESOURCE_GROUP=${RESOURCE_GROUP:-"ubuntu-vm-rg"}
-LOCATION=${LOCATION:-"eastus"}
+LOCATION=${LOCATION:-"swedencentral"}
 VM_NAME=${VM_NAME:-"ubuntu-vm"}
 IDENTITY_NAME=${IDENTITY_NAME:-"ubuntu-vm-identity"}
-VM_SIZE=${VM_SIZE:-"Standard_B2s"}
+VM_SIZE=${VM_SIZE:-"Standard_B4ms"}
 ADMIN_USERNAME=${ADMIN_USERNAME:-"azureuser"}
+NSG_NAME="${VM_NAME}-nsg"
+PUBLIC_IP_NAME="${VM_NAME}-public-ip"
 
 # Colors for output
 RED='\033[0;31m'
@@ -50,6 +52,33 @@ print_info "Location: $LOCATION"
 print_info "VM Name: $VM_NAME"
 print_info "Identity Name: $IDENTITY_NAME"
 
+# Detect the public IP of the machine running the script
+print_info "Detecting your public IP address..."
+MY_IP=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null || echo "")
+
+if [ -z "$MY_IP" ]; then
+    print_error "Could not detect your public IP address. Please check your internet connection."
+    exit 1
+fi
+
+# Calculate the /24 network
+IFS='.' read -r -a ip_parts <<< "$MY_IP"
+ALLOWED_NETWORK="${ip_parts[0]}.${ip_parts[1]}.${ip_parts[2]}.0/24"
+print_info "Your public IP: $MY_IP"
+print_info "Allowed network: $ALLOWED_NETWORK"
+
+# Check for existing SSH keys
+SSH_KEY_PATH="$HOME/.ssh/id_rsa.pub"
+if [ -f "$SSH_KEY_PATH" ]; then
+    print_info "Found existing RSA key at $SSH_KEY_PATH"
+    SSH_KEY_DATA=$(cat "$SSH_KEY_PATH")
+else
+    print_info "No existing RSA key found. Generating new SSH key pair..."
+    ssh-keygen -t rsa -b 4096 -f "$HOME/.ssh/id_rsa" -N "" -C "$ADMIN_USERNAME@$VM_NAME"
+    SSH_KEY_DATA=$(cat "$SSH_KEY_PATH")
+    print_info "New RSA key pair created at $HOME/.ssh/id_rsa"
+fi
+
 # Create resource group
 print_info "Creating resource group..."
 az group create \
@@ -58,6 +87,44 @@ az group create \
     --output none
 
 print_info "Resource group '$RESOURCE_GROUP' created successfully."
+
+# Create Network Security Group
+print_info "Creating Network Security Group..."
+az network nsg create \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$NSG_NAME" \
+    --location "$LOCATION" \
+    --output none
+
+print_info "NSG '$NSG_NAME' created successfully."
+
+# Create NSG rule to allow SSH from the /24 network
+print_info "Adding NSG rule to allow SSH from $ALLOWED_NETWORK..."
+az network nsg rule create \
+    --resource-group "$RESOURCE_GROUP" \
+    --nsg-name "$NSG_NAME" \
+    --name "AllowSSH" \
+    --priority 1000 \
+    --source-address-prefixes "$ALLOWED_NETWORK" \
+    --destination-port-ranges 22 \
+    --access Allow \
+    --protocol Tcp \
+    --description "Allow SSH from $ALLOWED_NETWORK" \
+    --output none
+
+print_info "NSG rule created successfully."
+
+# Create public IP address
+print_info "Creating public IP address..."
+az network public-ip create \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$PUBLIC_IP_NAME" \
+    --location "$LOCATION" \
+    --allocation-method Static \
+    --sku Standard \
+    --output none
+
+print_info "Public IP '$PUBLIC_IP_NAME' created successfully."
 
 # Create user-assigned managed identity
 print_info "Creating user-assigned managed identity..."
@@ -103,8 +170,12 @@ az vm create \
     --image "$IMAGE_URN" \
     --size "$VM_SIZE" \
     --admin-username "$ADMIN_USERNAME" \
-    --generate-ssh-keys \
+    --ssh-key-values "$SSH_KEY_DATA" \
+    --authentication-type ssh \
     --assign-identity "$IDENTITY_ID" \
+    --nsg "$NSG_NAME" \
+    --public-ip-address "$PUBLIC_IP_NAME" \
+    --public-ip-sku Standard \
     --output none
 
 print_info "VM '$VM_NAME' created successfully."
