@@ -203,9 +203,6 @@ if [ "$SKIP_VM_ARC" = false ]; then
         # Download and run the Arc agent installation script on the VM
         print_info "Downloading Arc agent installation script..."
         
-        # Generate Arc agent installation script URL
-        ARC_AGENT_SCRIPT_URL="https://aka.ms/azcmagent"
-        
         # Create a temporary script to install Arc agent
         TEMP_SCRIPT=$(mktemp)
         cat > "$TEMP_SCRIPT" << 'EOF'
