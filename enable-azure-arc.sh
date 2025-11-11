@@ -322,9 +322,11 @@ EOF
 #!/bin/bash
 set -e
 
-# Get access token from managed identity
+# Get access token from managed identity using Azure IMDS
 echo "Getting access token from managed identity..."
-ACCESS_TOKEN=$(curl -s 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F&client_id=IDENTITY_CLIENT_ID_PLACEHOLDER' -H Metadata:true | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+ACCESS_TOKEN=$(curl -s -H Metadata:true \
+    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F&client_id=IDENTITY_CLIENT_ID_PLACEHOLDER" \
+    | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
 
 if [ -z "$ACCESS_TOKEN" ]; then
     echo "Error: Failed to get access token from managed identity"
