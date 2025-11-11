@@ -227,6 +227,48 @@ print_info "To SSH into the VM, use:"
 PUBLIC_IP=$(echo "$VM_INFO" | grep -o '"publicIp": "[^"]*"' | cut -d'"' -f4)
 if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "null" ]; then
     print_info "ssh $ADMIN_USERNAME@$PUBLIC_IP"
+    
+    # Wait for VM to boot and SSH to be ready
+    print_info "================================"
+    print_info "Waiting for VM to boot and SSH to be ready..."
+    MAX_WAIT=120
+    WAIT_INTERVAL=10
+    ELAPSED=0
+    
+    while [ $ELAPSED -lt $MAX_WAIT ]; do
+        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes "$ADMIN_USERNAME@$PUBLIC_IP" "echo 'SSH is ready'" &> /dev/null; then
+            print_info "SSH is ready!"
+            break
+        fi
+        print_info "Waiting for SSH... ($ELAPSED seconds elapsed)"
+        sleep $WAIT_INTERVAL
+        ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+    done
+    
+    if [ $ELAPSED -ge $MAX_WAIT ]; then
+        print_warning "Timed out waiting for SSH. You may need to wait a bit longer before connecting."
+    else
+        # Copy all .sh files to the VM
+        print_info "================================"
+        print_info "Copying shell scripts to VM..."
+        
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        
+        for script in "$SCRIPT_DIR"/*.sh; do
+            if [ -f "$script" ]; then
+                SCRIPT_NAME=$(basename "$script")
+                print_info "Copying $SCRIPT_NAME..."
+                if scp -o StrictHostKeyChecking=no "$script" "$ADMIN_USERNAME@$PUBLIC_IP:~/"; then
+                    print_info "✓ $SCRIPT_NAME copied successfully"
+                else
+                    print_warning "Failed to copy $SCRIPT_NAME"
+                fi
+            fi
+        done
+        
+        print_info "================================"
+        print_info "All shell scripts have been copied to the VM's home directory."
+    fi
 else
     print_info "Public IP not yet assigned. Please check Azure portal."
 fi
