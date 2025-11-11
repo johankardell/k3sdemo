@@ -31,6 +31,63 @@ print_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
 }
 
+# Function to install Azure CLI
+install_azure_cli() {
+    print_step "Installing Azure CLI..."
+    
+    # Detect OS type
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+    else
+        print_error "Cannot detect operating system"
+        exit 1
+    fi
+    
+    # Install Azure CLI using the official method
+    print_info "Installing Azure CLI for $OS..."
+    
+    case "$OS" in
+        ubuntu|debian)
+            # Use the official Azure CLI installation script for Debian/Ubuntu
+            if ! curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash; then
+                print_error "Azure CLI installation failed"
+                exit 1
+            fi
+            ;;
+        rhel|centos|fedora)
+            # For RHEL-based systems, import the Microsoft repository key and install
+            print_info "Installing Azure CLI for RHEL-based systems..."
+            if ! sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc; then
+                print_error "Failed to import Microsoft GPG key"
+                exit 1
+            fi
+            if ! curl -sL -o /etc/yum.repos.d/azure-cli.repo https://packages.microsoft.com/yumrepos/azure-cli; then
+                print_error "Failed to add Azure CLI repository"
+                exit 1
+            fi
+            if ! sudo yum install -y azure-cli; then
+                print_error "Azure CLI installation failed"
+                exit 1
+            fi
+            ;;
+        *)
+            print_error "Unsupported operating system: $OS"
+            print_error "Please install Azure CLI manually from: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
+            exit 1
+            ;;
+    esac
+    
+    # Verify installation
+    if command -v az &> /dev/null; then
+        AZ_VERSION=$(az version --query '"azure-cli"' -o tsv 2>/dev/null || echo "unknown")
+        print_info "Azure CLI installed successfully (version: $AZ_VERSION)"
+    else
+        print_error "Azure CLI installation failed"
+        exit 1
+    fi
+}
+
 # Function to display usage
 usage() {
     echo "Usage: $0 --vm-name <VM_NAME> --resource-group <RESOURCE_GROUP> [OPTIONS]"
@@ -122,8 +179,8 @@ fi
 
 # Check if Azure CLI is installed
 if ! command -v az &> /dev/null; then
-    print_error "Azure CLI is not installed. Please install it first."
-    exit 1
+    print_warning "Azure CLI is not installed."
+    install_azure_cli
 fi
 
 # Check if user is logged in
