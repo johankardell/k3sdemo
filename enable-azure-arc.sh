@@ -284,22 +284,84 @@ EOF
         rm -f "$TEMP_SCRIPT"
         print_info "Arc agent installed successfully"
         
-        # Connect the VM to Azure Arc
-        print_info "Connecting VM to Azure Arc..."
+        # Generate SSH keys on the VM for Arc operations
+        print_info "Generating SSH keys on the VM..."
+        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "bash -c 'if [ ! -f ~/.ssh/id_rsa ]; then ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N \"\" -C \"arc-enablement@$VM_NAME\"; echo \"SSH key generated successfully\"; else echo \"SSH key already exists\"; fi'"
         
-        # Create a service principal for Arc onboarding or use existing credentials
-        print_info "Creating service principal for Arc onboarding..."
-        SP_NAME="arc-onboarding-${VM_NAME}-$(date +%s)"
-        SP_OUTPUT=$(az ad sp create-for-rbac --name "$SP_NAME" --role "Azure Connected Machine Onboarding" --scopes "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP")
-        SP_APP_ID=$(echo "$SP_OUTPUT" | grep -o '"appId": "[^"]*"' | cut -d'"' -f4)
-        SP_PASSWORD=$(echo "$SP_OUTPUT" | grep -o '"password": "[^"]*"' | cut -d'"' -f4)
-        SP_TENANT=$(echo "$SP_OUTPUT" | grep -o '"tenant": "[^"]*"' | cut -d'"' -f4)
+        # Connect the VM to Azure Arc using managed identity
+        print_info "Connecting VM to Azure Arc using managed identity..."
         
-        print_info "Service principal created: $SP_APP_ID"
+        # Get the tenant ID
+        TENANT_ID=$(az account show --query tenantId -o tsv)
         
-        # Run azcmagent connect on the VM
-        print_info "Running azcmagent connect..."
-        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "sudo azcmagent connect --service-principal-id '$SP_APP_ID' --service-principal-secret '$SP_PASSWORD' --resource-group '$RESOURCE_GROUP' --tenant-id '$SP_TENANT' --location '$LOCATION' --subscription-id '$SUBSCRIPTION_ID' --resource-name '$VM_NAME-arc'"
+        # Get the managed identity client ID from the VM
+        print_info "Retrieving managed identity information..."
+        IDENTITY_CLIENT_ID=$(az vm identity show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --query "userAssignedIdentities.*.clientId" -o tsv)
+        
+        if [ -z "$IDENTITY_CLIENT_ID" ]; then
+            print_error "Could not retrieve managed identity client ID from VM"
+            exit 1
+        fi
+        
+        print_info "Managed Identity Client ID: $IDENTITY_CLIENT_ID"
+        
+        # Ensure the managed identity has the required role for Arc onboarding
+        print_info "Ensuring managed identity has Azure Connected Machine Onboarding role..."
+        az role assignment create \
+            --assignee "$IDENTITY_CLIENT_ID" \
+            --role "Azure Connected Machine Onboarding" \
+            --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP" \
+            2>/dev/null || print_info "Role assignment already exists or was created"
+        
+        # Run azcmagent connect on the VM using managed identity
+        print_info "Running azcmagent connect with managed identity authentication..."
+        
+        # Create a script to run on the VM that uses managed identity to get access token
+        TEMP_CONNECT_SCRIPT=$(mktemp)
+        cat > "$TEMP_CONNECT_SCRIPT" << 'EOF'
+#!/bin/bash
+set -e
+
+# Get access token from managed identity using Azure IMDS
+echo "Getting access token from managed identity..."
+ACCESS_TOKEN=$(curl -s -H Metadata:true \
+    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F&client_id=IDENTITY_CLIENT_ID_PLACEHOLDER" \
+    | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
+
+if [ -z "$ACCESS_TOKEN" ]; then
+    echo "Error: Failed to get access token from managed identity"
+    exit 1
+fi
+
+echo "Access token obtained successfully"
+
+# Connect to Arc using the access token
+echo "Connecting to Azure Arc..."
+sudo azcmagent connect \
+    --resource-group "RESOURCE_GROUP_PLACEHOLDER" \
+    --tenant-id "TENANT_ID_PLACEHOLDER" \
+    --location "LOCATION_PLACEHOLDER" \
+    --subscription-id "SUBSCRIPTION_ID_PLACEHOLDER" \
+    --resource-name "VM_NAME_PLACEHOLDER-arc" \
+    --access-token "$ACCESS_TOKEN" \
+    --correlation-id "$(uuidgen)"
+
+echo "Connected successfully"
+EOF
+        
+        # Replace placeholders in the script
+        sed -i "s/IDENTITY_CLIENT_ID_PLACEHOLDER/$IDENTITY_CLIENT_ID/g" "$TEMP_CONNECT_SCRIPT"
+        sed -i "s/RESOURCE_GROUP_PLACEHOLDER/$RESOURCE_GROUP/g" "$TEMP_CONNECT_SCRIPT"
+        sed -i "s/TENANT_ID_PLACEHOLDER/$TENANT_ID/g" "$TEMP_CONNECT_SCRIPT"
+        sed -i "s/LOCATION_PLACEHOLDER/$LOCATION/g" "$TEMP_CONNECT_SCRIPT"
+        sed -i "s/SUBSCRIPTION_ID_PLACEHOLDER/$SUBSCRIPTION_ID/g" "$TEMP_CONNECT_SCRIPT"
+        sed -i "s/VM_NAME_PLACEHOLDER/$VM_NAME/g" "$TEMP_CONNECT_SCRIPT"
+        
+        # Copy and execute the script on the VM
+        scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$TEMP_CONNECT_SCRIPT" "$ADMIN_USERNAME@$VM_PUBLIC_IP:~/arc_connect.sh"
+        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "bash ~/arc_connect.sh && rm -f ~/arc_connect.sh"
+        
+        rm -f "$TEMP_CONNECT_SCRIPT"
         
         print_info "VM successfully connected to Azure Arc"
     fi
