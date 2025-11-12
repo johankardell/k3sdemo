@@ -90,6 +90,9 @@ Azure Arc allows you to manage and govern resources outside of Azure (or within 
 - kubectl installed
 - An existing Azure VM created with `create-ubuntu-vm.sh`
 - K3s installed on the VM using `install-k3s.sh`
+- Required Azure permissions to register resource providers and create Arc resources
+
+**When running from a remote machine:**
 - SSH access to the VM
 - **Network access**: The K3s API server (port 6443) must be accessible from the machine running this script. You may need to add an NSG rule to allow this:
   ```bash
@@ -103,15 +106,34 @@ Azure Arc allows you to manage and govern resources outside of Azure (or within 
     --access Allow \
     --protocol Tcp
   ```
-- Required Azure permissions to register resource providers and create Arc resources
+
+**When running directly on the VM:**
+- Use the `--running-on-vm` flag
+- No SSH keys or network access configuration needed
 
 ### Usage
 
-Enable both Azure Arc for the VM and K3s cluster:
+**Running from inside the VM (recommended):**
+
+The script can be run directly from inside the newly created Ubuntu VM. This is the simplest approach as it doesn't require SSH configuration or opening additional network ports.
+
+```bash
+# SSH into your VM first
+ssh azureuser@<VM_PUBLIC_IP>
+
+# Then run the script
+./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group ubuntu-vm-rg --running-on-vm
+```
+
+**Running from a remote machine:**
+
+Enable both Azure Arc for the VM and K3s cluster from your local machine:
 
 ```bash
 ./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group ubuntu-vm-rg
 ```
+
+**Additional examples:**
 
 Customize the location and cluster name:
 
@@ -120,7 +142,8 @@ Customize the location and cluster name:
   --vm-name ubuntu-vm \
   --resource-group ubuntu-vm-rg \
   --location westus2 \
-  --cluster-name my-k3s-cluster
+  --cluster-name my-k3s-cluster \
+  --running-on-vm
 ```
 
 Enable only Kubernetes Arc (skip VM Arc):
@@ -129,7 +152,8 @@ Enable only Kubernetes Arc (skip VM Arc):
 ./enable-azure-arc.sh \
   --vm-name ubuntu-vm \
   --resource-group ubuntu-vm-rg \
-  --skip-vm-arc
+  --skip-vm-arc \
+  --running-on-vm
 ```
 
 Enable only VM Arc (skip Kubernetes Arc):
@@ -138,7 +162,8 @@ Enable only VM Arc (skip Kubernetes Arc):
 ./enable-azure-arc.sh \
   --vm-name ubuntu-vm \
   --resource-group ubuntu-vm-rg \
-  --skip-k8s-arc
+  --skip-k8s-arc \
+  --running-on-vm
 ```
 
 ### Configuration Options
@@ -152,15 +177,16 @@ The script accepts the following parameters:
 **Optional:**
 - `--location`: Azure region (default: `swedencentral`)
 - `--cluster-name`: Name for the Arc-enabled K3s cluster (default: `<VM_NAME>-k3s`)
-- `--admin-username`: Admin username for VM SSH (default: `azureuser`)
-- `--ssh-key`: Path to SSH private key (default: `~/.ssh/id_rsa`)
+- `--admin-username`: Admin username for VM SSH (default: `azureuser`) - only needed for remote execution
+- `--ssh-key`: Path to SSH private key (default: `~/.ssh/id_rsa`) - only needed for remote execution
+- `--running-on-vm`: Run the script directly on the VM (no SSH required)
 - `--skip-vm-arc`: Skip Azure Arc enablement for the VM
 - `--skip-k8s-arc`: Skip Azure Arc enablement for Kubernetes
 - `--help`: Display help message
 
 ### What the Script Does
 
-1. Validates prerequisites (Azure CLI, kubectl, SSH key)
+1. Validates prerequisites (Azure CLI, kubectl - SSH key only if running remotely)
 2. Registers required Azure resource providers
 3. For VM Arc-enablement:
    - Generates SSH keys on the VM (if not already present)
@@ -168,9 +194,25 @@ The script accepts the following parameters:
    - Connects the VM to Azure Arc-enabled servers using the VM's managed identity for authentication
 4. For Kubernetes Arc-enablement:
    - Installs Azure CLI connectedk8s extension
-   - Retrieves kubeconfig from the VM
+   - Uses local kubeconfig (when running on VM) or retrieves it via SSH (when running remotely)
    - Connects the K3s cluster to Azure Arc-enabled Kubernetes
 5. Provides links to view resources in Azure Portal
+
+### Execution Modes
+
+The script supports two execution modes:
+
+1. **Local execution (on the VM)**: Use the `--running-on-vm` flag when running the script directly on the Azure VM. This mode:
+   - Does not require SSH keys or remote access
+   - Uses the local kubeconfig directly from `/etc/rancher/k3s/k3s.yaml`
+   - Runs all commands locally without SSH connections
+   - Is simpler and more reliable as it avoids network connectivity issues
+
+2. **Remote execution**: Run the script from your local machine without the `--running-on-vm` flag. This mode:
+   - Requires SSH access to the VM
+   - Requires port 6443 to be open for kubectl access to the K3s cluster
+   - Uses SCP to retrieve kubeconfig from the VM
+   - Executes commands on the VM via SSH
 
 ### After Arc Enablement
 
