@@ -101,12 +101,16 @@ usage() {
     echo "  --cluster-name <name>      Name for the Arc-enabled K3s cluster (default: <VM_NAME>-k3s)"
     echo "  --admin-username <user>    Admin username for VM SSH (default: azureuser)"
     echo "  --ssh-key <path>           Path to SSH private key (default: ~/.ssh/id_rsa)"
+    echo "  --running-on-vm            Run script directly on the VM (no SSH required)"
     echo "  --skip-vm-arc              Skip Azure Arc enablement for the VM"
     echo "  --skip-k8s-arc             Skip Azure Arc enablement for Kubernetes"
     echo "  --help                     Display this help message"
     echo ""
     echo "Examples:"
+    echo "  # Run from remote machine:"
     echo "  $0 --vm-name ubuntu-vm --resource-group ubuntu-vm-rg"
+    echo "  # Run from inside the VM:"
+    echo "  $0 --vm-name ubuntu-vm --resource-group ubuntu-vm-rg --running-on-vm"
     echo "  $0 --vm-name myvm --resource-group myrg --location westus2"
     echo "  $0 --vm-name myvm --resource-group myrg --skip-vm-arc"
     exit 0
@@ -121,6 +125,7 @@ ADMIN_USERNAME="azureuser"
 SSH_KEY_PATH="$HOME/.ssh/id_rsa"
 SKIP_VM_ARC=false
 SKIP_K8S_ARC=false
+RUNNING_ON_VM=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -147,6 +152,10 @@ while [[ $# -gt 0 ]]; do
         --ssh-key)
             SSH_KEY_PATH="$2"
             shift 2
+            ;;
+        --running-on-vm)
+            RUNNING_ON_VM=true
+            shift
             ;;
         --skip-vm-arc)
             SKIP_VM_ARC=true
@@ -196,7 +205,7 @@ if ! command -v kubectl &> /dev/null; then
 fi
 
 # Check if SSH key exists
-if [ ! -f "$SSH_KEY_PATH" ]; then
+if [ "$RUNNING_ON_VM" = false ] && [ ! -f "$SSH_KEY_PATH" ]; then
     print_error "SSH key not found at $SSH_KEY_PATH"
     exit 1
 fi
@@ -208,6 +217,7 @@ print_info "VM Name: $VM_NAME"
 print_info "Resource Group: $RESOURCE_GROUP"
 print_info "Location: $LOCATION"
 print_info "Cluster Name: $CLUSTER_NAME"
+print_info "Running on VM: $RUNNING_ON_VM"
 print_info "Skip VM Arc: $SKIP_VM_ARC"
 print_info "Skip K8s Arc: $SKIP_K8S_ARC"
 echo ""
@@ -228,14 +238,18 @@ if ! az vm show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" &> /dev/nul
     exit 1
 fi
 
-# Get VM's public IP
-print_info "Retrieving VM public IP address..."
-VM_PUBLIC_IP=$(az vm show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --show-details --query publicIps -o tsv)
-if [ -z "$VM_PUBLIC_IP" ] || [ "$VM_PUBLIC_IP" = "null" ]; then
-    print_error "Could not retrieve VM public IP address"
-    exit 1
+# Get VM's public IP (only needed when running remotely)
+if [ "$RUNNING_ON_VM" = false ]; then
+    print_info "Retrieving VM public IP address..."
+    VM_PUBLIC_IP=$(az vm show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --show-details --query publicIps -o tsv)
+    if [ -z "$VM_PUBLIC_IP" ] || [ "$VM_PUBLIC_IP" = "null" ]; then
+        print_error "Could not retrieve VM public IP address"
+        exit 1
+    fi
+    print_info "VM Public IP: $VM_PUBLIC_IP"
+else
+    print_info "Running on VM - skipping public IP retrieval"
 fi
-print_info "VM Public IP: $VM_PUBLIC_IP"
 
 # Register required Azure resource providers
 print_step "Registering Azure resource providers..."
@@ -252,17 +266,98 @@ if [ "$SKIP_VM_ARC" = false ]; then
     
     # Check if Arc agent is already installed on the VM
     print_info "Checking if Azure Connected Machine agent is already installed..."
-    if ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "systemctl is-active --quiet himdsd" 2>/dev/null; then
-        print_warning "Azure Connected Machine agent appears to be already installed and running"
+    
+    if [ "$RUNNING_ON_VM" = true ]; then
+        # Running locally on the VM
+        if systemctl is-active --quiet himdsd 2>/dev/null; then
+            print_warning "Azure Connected Machine agent appears to be already installed and running"
+        else
+            print_info "Installing Azure Connected Machine agent on VM..."
+            
+            # Download and run the Arc agent installation script locally
+            print_info "Downloading Arc agent installation script..."
+            wget https://aka.ms/azcmagent -O ~/install_linux_azcmagent.sh
+            sudo bash ~/install_linux_azcmagent.sh
+            rm -f ~/install_linux_azcmagent.sh
+            
+            print_info "Arc agent installed successfully"
+            
+            # Generate SSH keys for Arc operations if not present
+            print_info "Ensuring SSH keys exist..."
+            if [ ! -f ~/.ssh/id_rsa ]; then
+                ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -C "arc-enablement@$VM_NAME"
+                print_info "SSH key generated successfully"
+            else
+                print_info "SSH key already exists"
+            fi
+            
+            # Connect the VM to Azure Arc using managed identity
+            print_info "Connecting VM to Azure Arc using managed identity..."
+            
+            # Get the tenant ID
+            TENANT_ID=$(az account show --query tenantId -o tsv)
+            
+            # Get the managed identity client ID from the VM
+            print_info "Retrieving managed identity information..."
+            IDENTITY_CLIENT_ID=$(az vm identity show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --query "userAssignedIdentities.*.clientId" -o tsv)
+            
+            if [ -z "$IDENTITY_CLIENT_ID" ]; then
+                print_error "Could not retrieve managed identity client ID from VM"
+                exit 1
+            fi
+            
+            print_info "Managed Identity Client ID: $IDENTITY_CLIENT_ID"
+            
+            # Ensure the managed identity has the required role for Arc onboarding
+            print_info "Ensuring managed identity has Azure Connected Machine Onboarding role..."
+            az role assignment create \
+                --assignee "$IDENTITY_CLIENT_ID" \
+                --role "Azure Connected Machine Onboarding" \
+                --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP" \
+                2>/dev/null || print_info "Role assignment already exists or was created"
+            
+            # Run azcmagent connect using managed identity
+            print_info "Running azcmagent connect with managed identity authentication..."
+            
+            # Get access token from managed identity using Azure IMDS
+            print_info "Getting access token from managed identity..."
+            ACCESS_TOKEN=$(curl -s -H Metadata:true \
+                "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F&client_id=$IDENTITY_CLIENT_ID" \
+                | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
+            
+            if [ -z "$ACCESS_TOKEN" ]; then
+                print_error "Failed to get access token from managed identity"
+                exit 1
+            fi
+            
+            print_info "Access token obtained successfully"
+            
+            # Connect to Arc using the access token
+            print_info "Connecting to Azure Arc..."
+            sudo azcmagent connect \
+                --resource-group "$RESOURCE_GROUP" \
+                --tenant-id "$TENANT_ID" \
+                --location "$LOCATION" \
+                --subscription-id "$SUBSCRIPTION_ID" \
+                --resource-name "${VM_NAME}-arc" \
+                --access-token "$ACCESS_TOKEN" \
+                --correlation-id "$(uuidgen)"
+            
+            print_info "VM successfully connected to Azure Arc"
+        fi
     else
-        print_info "Installing Azure Connected Machine agent on VM..."
-        
-        # Download and run the Arc agent installation script on the VM
-        print_info "Downloading Arc agent installation script..."
-        
-        # Create a temporary script to install Arc agent
-        TEMP_SCRIPT=$(mktemp)
-        cat > "$TEMP_SCRIPT" << 'EOF'
+        # Running remotely - use SSH
+        if ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "systemctl is-active --quiet himdsd" 2>/dev/null; then
+            print_warning "Azure Connected Machine agent appears to be already installed and running"
+        else
+            print_info "Installing Azure Connected Machine agent on VM..."
+            
+            # Download and run the Arc agent installation script on the VM
+            print_info "Downloading Arc agent installation script..."
+            
+            # Create a temporary script to install Arc agent
+            TEMP_SCRIPT=$(mktemp)
+            cat > "$TEMP_SCRIPT" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -273,52 +368,52 @@ bash ~/install_linux_azcmagent.sh
 # Clean up
 rm -f ~/install_linux_azcmagent.sh
 EOF
-        
-        # Copy and execute the script on the VM
-        print_info "Copying installation script to VM..."
-        scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$TEMP_SCRIPT" "$ADMIN_USERNAME@$VM_PUBLIC_IP:~/install_arc.sh"
-        
-        print_info "Installing Arc agent (this may take a few minutes)..."
-        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "sudo bash ~/install_arc.sh && rm -f ~/install_arc.sh"
-        
-        rm -f "$TEMP_SCRIPT"
-        print_info "Arc agent installed successfully"
-        
-        # Generate SSH keys on the VM for Arc operations
-        print_info "Generating SSH keys on the VM..."
-        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "bash -c 'if [ ! -f ~/.ssh/id_rsa ]; then ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N \"\" -C \"arc-enablement@$VM_NAME\"; echo \"SSH key generated successfully\"; else echo \"SSH key already exists\"; fi'"
-        
-        # Connect the VM to Azure Arc using managed identity
-        print_info "Connecting VM to Azure Arc using managed identity..."
-        
-        # Get the tenant ID
-        TENANT_ID=$(az account show --query tenantId -o tsv)
-        
-        # Get the managed identity client ID from the VM
-        print_info "Retrieving managed identity information..."
-        IDENTITY_CLIENT_ID=$(az vm identity show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --query "userAssignedIdentities.*.clientId" -o tsv)
-        
-        if [ -z "$IDENTITY_CLIENT_ID" ]; then
-            print_error "Could not retrieve managed identity client ID from VM"
-            exit 1
-        fi
-        
-        print_info "Managed Identity Client ID: $IDENTITY_CLIENT_ID"
-        
-        # Ensure the managed identity has the required role for Arc onboarding
-        print_info "Ensuring managed identity has Azure Connected Machine Onboarding role..."
-        az role assignment create \
-            --assignee "$IDENTITY_CLIENT_ID" \
-            --role "Azure Connected Machine Onboarding" \
-            --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP" \
-            2>/dev/null || print_info "Role assignment already exists or was created"
-        
-        # Run azcmagent connect on the VM using managed identity
-        print_info "Running azcmagent connect with managed identity authentication..."
-        
-        # Create a script to run on the VM that uses managed identity to get access token
-        TEMP_CONNECT_SCRIPT=$(mktemp)
-        cat > "$TEMP_CONNECT_SCRIPT" << 'EOF'
+            
+            # Copy and execute the script on the VM
+            print_info "Copying installation script to VM..."
+            scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$TEMP_SCRIPT" "$ADMIN_USERNAME@$VM_PUBLIC_IP:~/install_arc.sh"
+            
+            print_info "Installing Arc agent (this may take a few minutes)..."
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "sudo bash ~/install_arc.sh && rm -f ~/install_arc.sh"
+            
+            rm -f "$TEMP_SCRIPT"
+            print_info "Arc agent installed successfully"
+            
+            # Generate SSH keys on the VM for Arc operations
+            print_info "Generating SSH keys on the VM..."
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "bash -c 'if [ ! -f ~/.ssh/id_rsa ]; then ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N \"\" -C \"arc-enablement@$VM_NAME\"; echo \"SSH key generated successfully\"; else echo \"SSH key already exists\"; fi'"
+            
+            # Connect the VM to Azure Arc using managed identity
+            print_info "Connecting VM to Azure Arc using managed identity..."
+            
+            # Get the tenant ID
+            TENANT_ID=$(az account show --query tenantId -o tsv)
+            
+            # Get the managed identity client ID from the VM
+            print_info "Retrieving managed identity information..."
+            IDENTITY_CLIENT_ID=$(az vm identity show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --query "userAssignedIdentities.*.clientId" -o tsv)
+            
+            if [ -z "$IDENTITY_CLIENT_ID" ]; then
+                print_error "Could not retrieve managed identity client ID from VM"
+                exit 1
+            fi
+            
+            print_info "Managed Identity Client ID: $IDENTITY_CLIENT_ID"
+            
+            # Ensure the managed identity has the required role for Arc onboarding
+            print_info "Ensuring managed identity has Azure Connected Machine Onboarding role..."
+            az role assignment create \
+                --assignee "$IDENTITY_CLIENT_ID" \
+                --role "Azure Connected Machine Onboarding" \
+                --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP" \
+                2>/dev/null || print_info "Role assignment already exists or was created"
+            
+            # Run azcmagent connect on the VM using managed identity
+            print_info "Running azcmagent connect with managed identity authentication..."
+            
+            # Create a script to run on the VM that uses managed identity to get access token
+            TEMP_CONNECT_SCRIPT=$(mktemp)
+            cat > "$TEMP_CONNECT_SCRIPT" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -348,22 +443,23 @@ sudo azcmagent connect \
 
 echo "Connected successfully"
 EOF
-        
-        # Replace placeholders in the script
-        sed -i "s/IDENTITY_CLIENT_ID_PLACEHOLDER/$IDENTITY_CLIENT_ID/g" "$TEMP_CONNECT_SCRIPT"
-        sed -i "s/RESOURCE_GROUP_PLACEHOLDER/$RESOURCE_GROUP/g" "$TEMP_CONNECT_SCRIPT"
-        sed -i "s/TENANT_ID_PLACEHOLDER/$TENANT_ID/g" "$TEMP_CONNECT_SCRIPT"
-        sed -i "s/LOCATION_PLACEHOLDER/$LOCATION/g" "$TEMP_CONNECT_SCRIPT"
-        sed -i "s/SUBSCRIPTION_ID_PLACEHOLDER/$SUBSCRIPTION_ID/g" "$TEMP_CONNECT_SCRIPT"
-        sed -i "s/VM_NAME_PLACEHOLDER/$VM_NAME/g" "$TEMP_CONNECT_SCRIPT"
-        
-        # Copy and execute the script on the VM
-        scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$TEMP_CONNECT_SCRIPT" "$ADMIN_USERNAME@$VM_PUBLIC_IP:~/arc_connect.sh"
-        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "bash ~/arc_connect.sh && rm -f ~/arc_connect.sh"
-        
-        rm -f "$TEMP_CONNECT_SCRIPT"
-        
-        print_info "VM successfully connected to Azure Arc"
+            
+            # Replace placeholders in the script
+            sed -i "s/IDENTITY_CLIENT_ID_PLACEHOLDER/$IDENTITY_CLIENT_ID/g" "$TEMP_CONNECT_SCRIPT"
+            sed -i "s/RESOURCE_GROUP_PLACEHOLDER/$RESOURCE_GROUP/g" "$TEMP_CONNECT_SCRIPT"
+            sed -i "s/TENANT_ID_PLACEHOLDER/$TENANT_ID/g" "$TEMP_CONNECT_SCRIPT"
+            sed -i "s/LOCATION_PLACEHOLDER/$LOCATION/g" "$TEMP_CONNECT_SCRIPT"
+            sed -i "s/SUBSCRIPTION_ID_PLACEHOLDER/$SUBSCRIPTION_ID/g" "$TEMP_CONNECT_SCRIPT"
+            sed -i "s/VM_NAME_PLACEHOLDER/$VM_NAME/g" "$TEMP_CONNECT_SCRIPT"
+            
+            # Copy and execute the script on the VM
+            scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$TEMP_CONNECT_SCRIPT" "$ADMIN_USERNAME@$VM_PUBLIC_IP:~/arc_connect.sh"
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP" "bash ~/arc_connect.sh && rm -f ~/arc_connect.sh"
+            
+            rm -f "$TEMP_CONNECT_SCRIPT"
+            
+            print_info "VM successfully connected to Azure Arc"
+        fi
     fi
 else
     print_warning "Skipping Azure Arc enablement for VM"
@@ -377,29 +473,52 @@ if [ "$SKIP_K8S_ARC" = false ]; then
     print_info "Installing Azure CLI connectedk8s extension..."
     az extension add --name connectedk8s --upgrade -y 2>/dev/null || az extension add --name connectedk8s -y
     
-    # Get kubeconfig from the VM
-    print_info "Retrieving kubeconfig from VM..."
-    TEMP_KUBECONFIG=$(mktemp)
-    
-    # Note: This requires K3s API server (port 6443) to be accessible from this machine
-    # If the NSG doesn't allow this, you may need to add a rule for port 6443
-    scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP:/etc/rancher/k3s/k3s.yaml" "$TEMP_KUBECONFIG"
-    
-    # Replace localhost with VM's public IP in kubeconfig
-    sed -i "s/127.0.0.1/$VM_PUBLIC_IP/g" "$TEMP_KUBECONFIG"
-    sed -i "s/localhost/$VM_PUBLIC_IP/g" "$TEMP_KUBECONFIG"
-    
-    # Export kubeconfig for kubectl commands
-    export KUBECONFIG="$TEMP_KUBECONFIG"
-    
-    # Verify kubectl connectivity
-    print_info "Verifying kubectl connectivity to K3s cluster..."
-    if ! kubectl get nodes &> /dev/null; then
-        print_error "Cannot connect to K3s cluster. Please check that K3s is running and accessible."
-        rm -f "$TEMP_KUBECONFIG"
-        exit 1
+    if [ "$RUNNING_ON_VM" = true ]; then
+        # Running locally on the VM - use local kubeconfig
+        print_info "Using local kubeconfig from /etc/rancher/k3s/k3s.yaml..."
+        
+        # Copy kubeconfig to temp location
+        TEMP_KUBECONFIG=$(mktemp)
+        sudo cp /etc/rancher/k3s/k3s.yaml "$TEMP_KUBECONFIG"
+        sudo chmod 644 "$TEMP_KUBECONFIG"
+        
+        # Export kubeconfig for kubectl commands
+        export KUBECONFIG="$TEMP_KUBECONFIG"
+        
+        # Verify kubectl connectivity
+        print_info "Verifying kubectl connectivity to K3s cluster..."
+        if ! kubectl get nodes &> /dev/null; then
+            print_error "Cannot connect to K3s cluster. Please check that K3s is running."
+            rm -f "$TEMP_KUBECONFIG"
+            exit 1
+        fi
+        print_info "Successfully connected to K3s cluster"
+    else
+        # Running remotely - get kubeconfig from the VM via SCP
+        print_info "Retrieving kubeconfig from VM..."
+        TEMP_KUBECONFIG=$(mktemp)
+        
+        # Note: This requires K3s API server (port 6443) to be accessible from this machine
+        # If the NSG doesn't allow this, you may need to add a rule for port 6443
+        scp -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "$ADMIN_USERNAME@$VM_PUBLIC_IP:/etc/rancher/k3s/k3s.yaml" "$TEMP_KUBECONFIG"
+        
+        # Replace localhost with VM's public IP in kubeconfig
+        sed -i "s/127.0.0.1/$VM_PUBLIC_IP/g" "$TEMP_KUBECONFIG"
+        sed -i "s/localhost/$VM_PUBLIC_IP/g" "$TEMP_KUBECONFIG"
+        
+        # Export kubeconfig for kubectl commands
+        export KUBECONFIG="$TEMP_KUBECONFIG"
+        
+        # Verify kubectl connectivity
+        print_info "Verifying kubectl connectivity to K3s cluster..."
+        if ! kubectl get nodes &> /dev/null; then
+            print_error "Cannot connect to K3s cluster. Please check that K3s is running and accessible."
+            print_error "Note: Port 6443 must be open in the NSG for remote access."
+            rm -f "$TEMP_KUBECONFIG"
+            exit 1
+        fi
+        print_info "Successfully connected to K3s cluster"
     fi
-    print_info "Successfully connected to K3s cluster"
     
     # Check if cluster is already Arc-enabled
     print_info "Checking if cluster is already Arc-enabled..."
