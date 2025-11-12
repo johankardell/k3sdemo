@@ -25,6 +25,10 @@ if systemctl is-active --quiet ufw; then
 else
     echo "✓ UFW is not active"
 fi
+echo ""
+echo "Installing Flux cli..."
+# Install Flux cli
+curl -s https://fluxcd.io/install.sh | sudo bash
 
 # Install k3s
 echo ""
