@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script to create an Ubuntu Server in Azure with User-Assigned Managed Identity
-# The identity will have contributor role on the resource group
+# The identity will have contributor role on the subscription
 
 set -e  # Exit on error
 
@@ -192,16 +192,15 @@ az vm auto-shutdown \
 
 print_info "Auto-shutdown configured successfully (18:00 CEST / 17:00 CET)."
 
-# Get the resource group ID
-RG_ID=$(az group show \
-    --name "$RESOURCE_GROUP" \
+# Get the subscription ID
+SUBSCRIPTION_ID=$(az account show \
     --query id \
     --output tsv)
 
-print_info "Resource Group ID: $RG_ID"
+print_info "Subscription ID: $SUBSCRIPTION_ID"
 
-# Assign Contributor role to the managed identity on the resource group
-print_info "Assigning Contributor role to managed identity on resource group..."
+# Assign Contributor role to the managed identity on the subscription
+print_info "Assigning Contributor role to managed identity on subscription..."
 
 # Wait a bit for the identity to propagate
 print_info "Waiting for identity to propagate..."
@@ -210,7 +209,7 @@ sleep 30
 az role assignment create \
     --assignee "$PRINCIPAL_ID" \
     --role "Contributor" \
-    --scope "$RG_ID" \
+    --scope "/subscriptions/$SUBSCRIPTION_ID" \
     --output none
 
 print_info "Contributor role assigned successfully."
