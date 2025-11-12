@@ -31,3 +31,23 @@ EOF
 TOKEN=$(kubectl get secret azure-portal-user-secret -o jsonpath='{$.data.token}' | base64 -d | sed 's/$/\n/g')
 
 echo Paste this into the Azure portal: $TOKEN
+
+# Enable Flux extension on Arc-enabled cluster
+az k8s-extension create \
+  --cluster-name "$k3s_cluster_name" \
+  --resource-group "$resource_group" \
+  --cluster-type connectedClusters \
+  --extension-type microsoft.flux \
+  --name flux
+
+# Create Flux configuration to sync application from GitHub
+az k8s-configuration flux create \
+  --cluster-name "$k3s_cluster_name" \
+  --resource-group "$resource_group" \
+  --cluster-type connectedClusters \
+  --name k3sdemo-flux-config \
+  --namespace flux-system \
+  --scope cluster \
+  --url https://github.com/johankardell/k3sdemo \
+  --branch main \
+  --kustomization name=flux path=./flux prune=true
