@@ -7,6 +7,8 @@ echo "K3s Installation Script for Ubuntu LTS"
 echo "=========================================="
 echo ""
 
+
+
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     echo "Error: This script must be run as root"
@@ -15,6 +17,13 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "✓ Running as root"
+
+# Increase open files limit for all users
+echo ""
+echo "Configuring system limits..."
+echo "* soft nofile 131072" >> /etc/security/limits.conf
+echo "* hard nofile 131072" >> /etc/security/limits.conf
+echo "✓ Open files limit set to 131072 for all users"
 
 # Disable UFW firewall (for demo environment)
 echo ""
@@ -71,6 +80,7 @@ cp /etc/rancher/k3s/k3s.yaml "$USER_HOME/.kube/config"
 # Set proper ownership
 chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$USER_HOME/.kube"
 chmod 600 "$USER_HOME/.kube/config"
+chmod 755 /etc/rancher/k3s/k3s.yaml
 
 echo "✓ kubeconfig set up at $USER_HOME/.kube/config"
 

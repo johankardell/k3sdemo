@@ -1,8 +1,9 @@
 export k3s_cluster_name="ubuntu-k3s"
-export resource_group="ubuntu-vm-rg"
+export resource_group="rg-k3s-arc"
 export location="swedencentral"
+alias k=kubectl
 
-sudo chmod 750 /etc/rancher/k3s/k3s.yaml
+sudo chmod 755 /etc/rancher/k3s/k3s.yaml
 
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash  
 
@@ -45,7 +46,7 @@ az k8s-configuration flux create \
   --cluster-name "$k3s_cluster_name" \
   --resource-group "$resource_group" \
   --cluster-type connectedClusters \
-  --name k3sdemo-flux-config \
+  --name flux-config \
   --namespace flux-system \
   --scope cluster \
   --url https://github.com/johankardell/k3sdemo \

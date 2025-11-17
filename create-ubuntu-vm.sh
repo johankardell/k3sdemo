@@ -6,7 +6,7 @@
 set -e  # Exit on error
 
 # Configuration variables
-RESOURCE_GROUP=${RESOURCE_GROUP:-"ubuntu-vm-rg"}
+RESOURCE_GROUP=${RESOURCE_GROUP:-"rg-k3s-arc"}
 LOCATION=${LOCATION:-"swedencentral"}
 VM_NAME=${VM_NAME:-"ubuntu-vm"}
 IDENTITY_NAME=${IDENTITY_NAME:-"ubuntu-vm-identity"}

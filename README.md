@@ -122,7 +122,7 @@ The script can be run directly from inside the newly created Ubuntu VM. This is 
 ssh azureuser@<VM_PUBLIC_IP>
 
 # Then run the script
-./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group ubuntu-vm-rg --running-on-vm
+./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group rg-k3s-arc --running-on-vm
 ```
 
 **Running from a remote machine:**
@@ -130,7 +130,7 @@ ssh azureuser@<VM_PUBLIC_IP>
 Enable both Azure Arc for the VM and K3s cluster from your local machine:
 
 ```bash
-./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group ubuntu-vm-rg
+./enable-azure-arc.sh --vm-name ubuntu-vm --resource-group rg-k3s-arc
 ```
 
 **Additional examples:**
@@ -140,7 +140,7 @@ Customize the location and cluster name:
 ```bash
 ./enable-azure-arc.sh \
   --vm-name ubuntu-vm \
-  --resource-group ubuntu-vm-rg \
+  --resource-group rg-k3s-arc \
   --location westus2 \
   --cluster-name my-k3s-cluster \
   --running-on-vm
@@ -151,7 +151,7 @@ Enable only Kubernetes Arc (skip VM Arc):
 ```bash
 ./enable-azure-arc.sh \
   --vm-name ubuntu-vm \
-  --resource-group ubuntu-vm-rg \
+  --resource-group rg-k3s-arc \
   --skip-vm-arc \
   --running-on-vm
 ```
@@ -161,7 +161,7 @@ Enable only VM Arc (skip Kubernetes Arc):
 ```bash
 ./enable-azure-arc.sh \
   --vm-name ubuntu-vm \
-  --resource-group ubuntu-vm-rg \
+  --resource-group rg-k3s-arc \
   --skip-k8s-arc \
   --running-on-vm
 ```
@@ -273,7 +273,7 @@ ADMIN_USERNAME="myadmin" \
 
 ### Configuration Variables
 
-- `RESOURCE_GROUP`: Name of the resource group (default: `ubuntu-vm-rg`)
+- `RESOURCE_GROUP`: Name of the resource group (default: `rg-k3s-arc`)
 - `LOCATION`: Azure region (default: `swedencentral`)
 - `VM_NAME`: Name of the VM (default: `ubuntu-vm`)
 - `IDENTITY_NAME`: Name of the managed identity (default: `ubuntu-vm-identity`)

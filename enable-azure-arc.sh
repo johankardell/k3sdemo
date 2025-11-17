@@ -108,9 +108,9 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  # Run from remote machine:"
-    echo "  $0 --vm-name ubuntu-vm --resource-group ubuntu-vm-rg"
+    echo "  $0 --vm-name ubuntu-vm --resource-group rg-k3s-arc"
     echo "  # Run from inside the VM:"
-    echo "  $0 --vm-name ubuntu-vm --resource-group ubuntu-vm-rg --running-on-vm"
+    echo "  $0 --vm-name ubuntu-vm --resource-group rg-k3s-arc --running-on-vm"
     echo "  $0 --vm-name myvm --resource-group myrg --location westus2"
     echo "  $0 --vm-name myvm --resource-group myrg --skip-vm-arc"
     exit 0
