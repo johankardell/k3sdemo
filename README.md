@@ -21,7 +21,7 @@ az extension update --name k8s-configuration
 ```
 
 ### Policy assignment
-Assign the Azure policy 'Kubernetes cluster containers CPU and memory resource requests must be defined' to the subscription of the lab.
+Assign the Azure policy 'Kubernetes cluster containers CPU and memory resource requests must be defined' to the subscription of the lab. Set the parameter namespaces to "demo". This way we won't break Defender for containers and other pods that might spin up in other namespaces.
 
 This policy will block the creation of pods without resource request defined.
 
@@ -166,6 +166,7 @@ kubectl get pods -n demo
 ```
 
 We only have pods with resources correctly specified running in the namespace.
+
 Also check the deployments:
 ```sh
 kubectl get deployments -n demo
@@ -175,7 +176,7 @@ nginx-deployment         3/3     3            3           68s
 nginx-deployment-nores   0/3     0            0           68s
 ```
 
-Azure policy is controlling the behaviour within the cluster through gatekeeper functionality.
+Azure policy is controlling the behaviour within the cluster through gatekeeper functionality. This is of course a problem, since the Flux config always will be _non-compliant_ as long as we have this misconfiguration.
 
 # Create Lab server 2
 
@@ -284,7 +285,6 @@ Use the portal to:
 Do this for both clusters, and make sure you use the same Azure monitor workspace and Log analytics workspace for both clusters.
 
 **Bonus:** Enable managed Grafana through the portal. This is not a free service, but for a lab the cost is a dollar or two.
-
 
 Look at the visualizations and pre-built dashboards available in the Azure portal. They will only show data for the selected cluster, but if you do the bonus challenge you can get dashboards covering multiple clusters.
 
