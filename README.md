@@ -21,35 +21,42 @@ az extension update --name k8s-configuration
 ```
 
 ### Policy assignment
-Assign the policy 'Kubernetes cluster containers CPU and memory resource requests must be defined' to the subscription of the lab.
+Assign the Azure policy 'Kubernetes cluster containers CPU and memory resource requests must be defined' to the subscription of the lab.
+
+This policy will block the creation of pods without resource request defined.
 
 ## 2
 Create Lab server 1
 
-Run from laptop
+In this lab we're creating an Azure VM that we will use a simulated edge server running in for example a warehouse, store or factory.
+
+**Run from laptop:**
 
 ```sh
+# Create vm-host1
 ./create-vm.sh rg-site1 vm-host1
 ```
 
-## Run from vm-host1
-Install K3s
+**Run from vm-host1**
 
 ```sh
+# Install K3s
 sudo ./install-k3s.sh
-```
 
-### Install Azure cli on vm-host1
-
-```sh
+#Install Azure cli
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash  
 
+# Login and setup
 az login -i
 az config set extension.dynamic_install_allow_preview=true
 az config set extension.use_dynamic_install=yes_without_prompt
 ```
 
 ### Enable ARC on k3s cluster
+
+ARC will allow us to extend cloud functionality to our edge servers and clusters. In this lab we are only Arc enabling our K3s installation, since the VM already lives in Azure. If this was a real scenario we would also Arc enable the server.
+
+**Run from vm-host1**
 ```sh
 export k3s_cluster_name="k3s-site1"
 export resource_group="rg-site1"
@@ -62,6 +69,12 @@ az connectedk8s connect --name "$k3s_cluster_name" --resource-group "$resource_g
 ```
 
 ### Setup Flux
+
+Flux is the Gitops engine currently supported from Microsoft. We will install it as an extension on the k3s cluster. Flux will also become visible in the Azure portal, and we can also perform operations from the portal through Flux.
+
+In this step we are also adding a configuration for Flux to let it pull manifests from this repo and automatically apply them to the K3s cluster.
+
+**Run from vm-host1**
 ```sh
 # Enable Flux extension on Arc-enabled cluster
 az k8s-extension create \
@@ -85,21 +98,24 @@ az k8s-configuration flux create \
 ```
 
 ### Setup configuration for Azure portal (Service account token authentication)
+If you look at the cluster in the Azure portal right now, and click on for example Namespaces - you will be asked to provide a token. In this step we will create that token. This is one of the two different ways we can access our cluster through the portal.
+
+**Run from vm-host1**
 ```sh
-kubectl create serviceaccount azure-portal-user -n default
-kubectl create clusterrolebinding azure-portal-user-binding --clusterrole cluster-admin --serviceaccount default:azure-portal-user
+kubectl create serviceaccount azure-user -n default
+kubectl create clusterrolebinding azure-user-binding --clusterrole cluster-admin --serviceaccount default:azure-user
 
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
-  name: azure-portal-user-secret
+  name: azure-user-secret
   annotations:
-    kubernetes.io/service-account.name: azure-portal-user
+    kubernetes.io/service-account.name: azure-user
 type: kubernetes.io/service-account-token
 EOF
 
-TOKEN=$(kubectl get secret azure-portal-user-secret -o jsonpath='{$.data.token}' | base64 -d | sed 's/$/\n/g')
+TOKEN=$(kubectl get secret azure-user-secret -o jsonpath='{$.data.token}' | base64 -d | sed 's/$/\n/g')
 
 echo Paste this into the Azure portal: $TOKEN
 ```
@@ -153,28 +169,24 @@ nginx-deployment-nores   0/3     0            0           68s
 
 Azure policy is controlling the behaviour within the cluster through gatekeeper functionality.
 
-# 3
-Create Lab server 2
+# Create Lab server 2
 
-Run from laptop
+**Run from laptop**
 
 ```sh
 ./create-vm.sh rg-site2 vm-host2
 ```
 
-
-## Run from vm-host2
-Install K3s
+**Run from vm-host2**
 
 ```sh
+# Install K3s
 sudo ./install-k3s.sh
-```
 
-### Install Azure cli
-
-```sh
+#Install Azure cli
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash  
 
+# Login and setup
 az login -i
 az config set extension.dynamic_install_allow_preview=true
 az config set extension.use_dynamic_install=yes_without_prompt
@@ -265,7 +277,7 @@ Look at the visualizations and pre-built dashboards available in the Azure porta
 Open Logs for one of the K3s clusters through the Azure portal. Search for a pre-built KQL query named "Kubernetes events". Run it and familiarize yourself with the syntax and output.
 
 ### Bonus challenges
-Defender for containers
-Create Azure container registry and enable Defender for containers on it
-Create a new git repo, with your own manifests
-Create a new Flux configuration that pulls from your git repo
+* Defender for containers
+* Create Azure container registry and enable Defender for containers on it
+* Create a new git repo, with your own manifests
+* Create a new Flux configuration that pulls from your git repo
