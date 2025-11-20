@@ -1,4 +1,5 @@
 #!/bin/bash
+export K3S_VERSION="1.28.5+k3s1" # Do not change!
 
 set -e
 
@@ -21,17 +22,19 @@ echo ""
 echo "Configuring system limits..."
 echo "* soft nofile 131072" >> /etc/security/limits.conf
 echo "* hard nofile 131072" >> /etc/security/limits.conf
+echo "root soft nofile 131072" >> /etc/security/limits.conf
+echo "root hard nofile 131072" >> /etc/security/limits.conf
+echo "DefaultLimitNOFILE=131072:131072" >> /etc/systemd/system.conf
+echo "DefaultLimitNOFILE=131072:131072" >> /etc/systemd/user.conf
+echo "session required pam_limits.so" >> /etc/pam.d/common-session
+echo "session required pam_limits.so" >> /etc/pam.d/common-session-noninteractive
 echo "✓ Open files limit set to 131072 for all users"
 
-# Configure logsettings to avoid running out of file handles
-sudo mkdir -p /etc/rancher/k3s
-# If /etc/rancher/k3s/config.yaml already exists, merge these lines into the existing 'kubelet-arg:' list.
-cat <<'EOF' | sudo tee -a /etc/rancher/k3s/config.yaml
-kubelet-arg:
-  - container-log-max-size=10Mi
-  - container-log-max-files=3
+sudo tee /etc/sysctl.d/99-fluent-bit-inotify.conf >/dev/null <<'EOF'
+fs.inotify.max_user_watches = 524288
+fs.inotify.max_user_instances = 16384
+fs.inotify.max_queued_events = 524288
 EOF
-echo "✓ k3s logs configured"
 
 # Disable UFW firewall (for demo environment)
 echo ""

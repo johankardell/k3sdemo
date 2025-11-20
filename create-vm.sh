@@ -6,9 +6,10 @@
 set -e  # Exit on error
 
 # Configuration variables
-RESOURCE_GROUP=${RESOURCE_GROUP:-"rg-k3s-arc"}
+# Usage: ./create-ubuntu-vm.sh [RESOURCE_GROUP] [VM_NAME]
+RESOURCE_GROUP="${1:-rg-k3s-arc}"
 LOCATION=${LOCATION:-"swedencentral"}
-VM_NAME=${VM_NAME:-"ubuntu-vm"}
+VM_NAME="${2:-ubuntu-vm}"
 IDENTITY_NAME=${IDENTITY_NAME:-"ubuntu-vm-identity"}
 VM_SIZE=${VM_SIZE:-"Standard_B4ms"}
 ADMIN_USERNAME=${ADMIN_USERNAME:-"azureuser"}
@@ -147,13 +148,15 @@ print_info "Principal ID: $PRINCIPAL_ID"
 
 # Get the latest Ubuntu LTS image
 print_info "Fetching latest Ubuntu LTS image..."
-IMAGE_URN=$(az vm image list \
-    --publisher Canonical \
-    --offer 0001-com-ubuntu-server-jammy \
-    --sku 22_04-lts-gen2 \
-    --all \
-    --query "[0].urn" \
-    --output tsv)
+# IMAGE_URN=$(az vm image list \
+#     --publisher Canonical \
+#     --offer 0001-com-ubuntu-server-jammy \
+#     --sku 22_04-lts-gen2 \
+#     --all \
+#     --query "[0].urn" \
+#     --output tsv)
+
+IMAGE_URN="canonical:ubuntu-25_10-daily:server:latest"
 
 if [ -z "$IMAGE_URN" ]; then
     print_warning "Could not fetch specific image version, using default Ubuntu LTS."
