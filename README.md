@@ -256,7 +256,16 @@ Use the portal to:
 2. Enable Container insights (using Log analytics - this can become expensinve in large installations)
 
 Do this for both clusters, and make sure you use the same Azure monitor workspace and Log analytics workspace for both clusters.
+```
+Bonus: Enable managed Grafana through the portal. This is not a free service.
+```
 
-Bonus:
-Enable managed Grafana through the portal. This is not a free service.
+Look at the visualizations and pre-built dashboards available in the Azure portal. They will only show data for the selected cluster, but if you do the bonus challenge you can get dashboards covering multiple clusters.
 
+Open Logs for one of the K3s clusters through the Azure portal. Search for a pre-built KQL query named "Kubernetes events". Run it and familiarize yourself with the syntax and output.
+
+### Bonus challenges
+Defender for containers
+Create Azure container registry and enable Defender for containers on it
+Create a new git repo, with your own manifests
+Create a new Flux configuration that pulls from your git repo
