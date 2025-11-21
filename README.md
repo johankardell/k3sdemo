@@ -1,5 +1,8 @@
 # K3S LAB
 
+**Remember**
+This is a learning activity. It's not a race where the quickest participant wins.  
+
 ## Pre-reqs
 Select correct lab subscription and register resource providers
 
@@ -44,7 +47,7 @@ sudo ./install-k3s.sh
 # Install Azure cli
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash  
 
-# Login and setup
+# Login with the Managed identity of the VM and setup Azure cli
 az login -i
 az config set extension.dynamic_install_allow_preview=true
 az config set extension.use_dynamic_install=yes_without_prompt
@@ -120,10 +123,52 @@ TOKEN=$(kubectl get secret azure-user-secret -o jsonpath='{$.data.token}' | base
 echo Paste this into the Azure portal: $TOKEN
 ```
 
+### Create a deployment from the Azure portal
+
+Since we now have enabled management through the Azure portal, create a new deployment.
+Under Workload, click Add, and click "Ask Copilot". 
+Paste this prompt or make up your own:  
+```
+Create a deployment named Ubuntu that uses ubuntu:latest image. Deploy to namespace default. Set reasonable resource limits, and only one replica. Run the command 'sleep 3600'.
+```
+The result should be something like this:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ubuntu
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ubuntu
+  template:
+    metadata:
+      labels:
+        app: ubuntu
+    spec:
+      containers:
+        - name: ubuntu
+          image: ubuntu:latest
+          command:
+            - sleep
+            - '3600'
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: 500m
+            requests:
+              memory: 256Mi
+              cpu: 250m
+
+```
+
 ### Use kubectl from your laptop
 Open a terminal on your laptop and run (paste the token from the previous code block, same as for the portal):
 ```sh
-az connectedk8s proxy --name k3s-site2 --resource-group rg-site2 --token <paste token from previous code block>
+az connectedk8s proxy --name k3s-site1 --resource-group rg-site1 --token <paste token from previous code block>
 ```
 
 Open up another terminal on your laptop and run
