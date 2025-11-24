@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: factory-sim-config
+  labels:
+    part-of: k3s-demo-factory
+---
+# RBAC: Grant Flux the ability to manage all resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-applier-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: flux-applier
+    namespace: factory-sim-config
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: k3s-demo-repo
+  namespace: factory-sim-config
+spec:
+  interval: 1m
+  url: https://github.com/johankardell/k3sdemo
+  ref:
+    branch: main
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: factory-app-sync
+  namespace: factory-sim-config
+spec:
+  interval: 10m
+  path: "./flux"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: k3s-demo-repo
+  targetNamespace: default
+  serviceAccountName: flux-applier  # Make sure Flux uses this SA
+---
+apiVersion: placement.kubernetes-fleet.io/v1
+kind: ClusterResourcePlacement
+metadata:
+  name: deploy-factory-configs
+spec:
+  resourceSelectors:
+    - group: ""
+      kind: Namespace
+      name: factory-sim-config
+      version: v1
+  policy:
+    placementType: PickAll
+
