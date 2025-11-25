@@ -4,12 +4,14 @@ metadata:
   name: factory-sim-config
   labels:
     part-of: k3s-demo-factory
+    fleet-propagate: "true"
 ---
-# RBAC: Grant Flux the ability to manage all resources
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: flux-applier-cluster-admin
+  labels:
+    fleet-propagate: "true"  # Add label so we can select it
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -43,18 +45,23 @@ spec:
     kind: GitRepository
     name: k3s-demo-repo
   targetNamespace: default
-  serviceAccountName: flux-applier  # Make sure Flux uses this SA
+  serviceAccountName: flux-applier
 ---
-apiVersion: placement.kubernetes-fleet.io/v1
+apiVersion: placement.kubernetes-fleet.io/v1beta1
 kind: ClusterResourcePlacement
 metadata:
   name: deploy-factory-configs
 spec:
   resourceSelectors:
+    # Select the namespace
     - group: ""
       kind: Namespace
       name: factory-sim-config
       version: v1
+    # Select the ClusterRoleBinding explicitly
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+      name: flux-applier-cluster-admin
+      version: v1
   policy:
     placementType: PickAll
-
